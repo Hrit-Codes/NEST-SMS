@@ -36,32 +36,43 @@ export class ProvidersService {
         }
     }
 
-    async getRouteHealth(){
-        const providers=await this.prisma.provider.findMany({
-            include:{
-                attempts:{
-                    take:100,
-                    orderBy:{createdAt:"desc"}
-                }
-            }
-        });
+    async getRouteHealth() {
+    // Calculate the timestamp for 24 hours ago
+    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
-        return providers.map((provider)=>{
-            const recentAttempts=provider.attempts;
-            const totalAttempts=recentAttempts.length;
-            const successfulAttempts=recentAttempts.filter((a)=>a.success).length;
-            const successRate=totalAttempts>0?successfulAttempts/totalAttempts:1;
-            const healthScore=(provider.balance/provider.maxBalance)*100*(1-provider.failureRate);
+    const providers = await this.prisma.provider.findMany({
+        include: {
+        attempts: {
+            where: {
+            createdAt: { gte: twentyFourHoursAgo }, 
+            },
+        },
+        },
+    });
 
-            return{
-                provider:provider.name,
-                priority:provider.priority,
-                balance:provider.balance,
-                maxBalance:provider.maxBalance,
-                failureRate:provider.failureRate,
-                recentSuccessRate:successRate,
-                healthScore:Math.round(healthScore*100)/100
-            }
-        })
+    return providers.map((provider) => {
+        const recentAttempts = provider.attempts;
+        const totalAttempts = recentAttempts.length;
+        const successfulAttempts = recentAttempts.filter((a) => a.success).length;
+        
+        const actualSuccessRate = totalAttempts > 0 ? successfulAttempts / totalAttempts : 1;
+        
+        // Balance score: 0.0 to 1.0
+        const balanceScore = provider.balance / provider.maxBalance;
+
+        // We multiply by 100 to get a percentage
+        const healthScore = ((actualSuccessRate * 0.7) + (balanceScore * 0.3)) * 100;
+
+        return {
+        provider: provider.name,
+        priority: provider.priority,
+        balance: provider.balance,
+        maxBalance: provider.maxBalance,
+        failureRateConfig: provider.failureRate, 
+        attemptsLast24h: totalAttempts,
+        recentSuccessRate: Math.round(actualSuccessRate * 10000) / 100, 
+        healthScore: Math.round(healthScore * 100) / 100,
+        };
+    });
     }
 }
