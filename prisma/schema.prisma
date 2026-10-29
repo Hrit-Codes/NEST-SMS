@@ -1,0 +1,88 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum MessageStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+enum Encoding {
+  GSM7
+  UNICODE
+}
+
+model User {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  passwordHash String
+  wallet       Wallet?
+  messages     Message[]
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}
+
+model Wallet {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  balance   Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Provider {
+  id          String            @id @default(uuid())
+  name        String            @unique
+  priority    Int
+  balance     Int
+  maxBalance  Int
+  failureRate Float
+  isActive    Boolean           @default(true)
+  attempts    ProviderAttempt[]
+  messages    Message[] 
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+}
+
+model Message {
+  id         String            @id @default(uuid())
+  userId     String
+  user       User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  to         String
+  body       String
+  encoding   Encoding
+  parts      Int
+  cost       Int
+  status     MessageStatus     @default(PENDING)
+  refunded   Boolean           @default(false)
+  providerId String?
+  provider   Provider?         @relation(fields: [providerId], references: [id])
+  attempts   ProviderAttempt[]
+  createdAt  DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
+
+  @@index([userId, status, createdAt])
+  @@index([userId, createdAt])
+  @@index([to])
+}
+
+model ProviderAttempt {
+  id          String   @id @default(uuid())
+  messageId   String
+  message     Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  providerId  String
+  provider    Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  success     Boolean
+  errorReason String?
+  createdAt   DateTime @default(now())
+
+  @@index([messageId])
+  @@index([providerId, createdAt])
+}
