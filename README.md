@@ -2,7 +2,7 @@
 
 A REST API that accepts SMS requests, charges credits from a per-user wallet, delivers messages through mock providers (routes), automatically **fails over** to the next provider when one fails, and **refunds** credits when a message cannot be delivered on any route.
 
-Built as the take-home assignment for the **Backend Developer Intern** role at **Nest Nepal Business Solutions**.
+Built as the take-home assignment for the **Backend Developer Position** role at **Nest Nepal Business Solutions**.
 
 > **Core guarantee:** a credit is never lost or double-spent. Parallel requests, a failing route, or a provider outage cannot leave a wallet with the wrong balance.
 
@@ -468,57 +468,10 @@ healthScore = (balance / maxBalance) × 100 × (1 − failureRate)
 - **One message row per recipient.** Each recipient has its own status, cost, provider and attempts, so partial success is representable and refunds are exact per message.
 - **Audit trail through `ProviderAttempt`.** Every attempt (success or failure) is stored, which powers failover visibility in the logs and the health endpoint.
 - **Idempotent refunds.** The `refunded` flag plus the `status = PENDING` guard make a double refund impossible.
-- **Provider credits are reserved before sending.** This keeps provider balances accurate when concurrent sends hit the same route.
 - **Debit commits before delivery.** Provider calls never run inside a DB transaction.
 - **Strict input validation.** The global `ValidationPipe` uses `whitelist` and `forbidNonWhitelisted`, so unknown fields are rejected.
 - **Per-user rate limiting.** Throttling is keyed by user id (falling back to IP) at 60 requests per minute on wallet and SMS routes.
 - **Logs are scoped to the caller.** Users can only read their own messages.
-
----
-
-## Testing the Concurrency Guarantee
-
-The brief's scenario: *20 parallel send requests against a wallet that can only afford 10 should result in exactly 10 successes.*
-
-A new account starts with 50 credits. Each request below sends to 5 recipients at 1 part each, which costs 5 credits, so exactly **10 of 20** requests can be afforded.
-
-```bash
-BASE=http://localhost:3000/api/v1
-
-# 1. Register and capture the token
-TOKEN=$(curl -s -X POST $BASE/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{"email":"race@example.com","password":"Strong#123"}' \
-  | node -pe "JSON.parse(require('fs').readFileSync(0,'utf8')).token")
-
-# 2. Fire 20 parallel requests (5 recipients x 1 part = 5 credits each)
-seq 1 20 | xargs -P 20 -I{} curl -s -o /dev/null -w "%{http_code}\n" \
-  -X POST $BASE/sms/send \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"to":["9841234567","9841234568","9841234569","9841234570","9841234571"],"body":"race test"}' \
-  | sort | uniq -c
-
-# 3. Check the final balance
-curl -s $BASE/wallet/balance -H "Authorization: Bearer $TOKEN"
-```
-
-**Expected:** 10 responses with `201` and 10 with `400 Insufficient credits`. The balance never goes negative.
-
-> Because refunds are real, a message that fails on every route returns its credits. In rare runs that can legitimately free enough credit for one extra request to be accepted. The wallet is never overspent either way.
-
-### Manual checks for the other scenarios
-
-| Scenario | How to see it |
-| --- | --- |
-| Number normalisation | Send to `+9779801122334` and check `to` in the response (`9801122334`) |
-| Invalid number | Send to `9612345678` and expect a `400` listing it |
-| Unicode costing | Send a 100-character Nepali message and expect `encoding: UNICODE`, `parts: 2` |
-| Failover | Send several messages, then open `/sms/logs` and look for messages whose `attempts` show a failed `ROUTE_A` followed by a successful `ROUTE_B` |
-| Refund | Set all `failureRate` values to `1.0` in the `Provider` table (or lower provider balances to 0), send an SMS, and observe `FAILED` + `refunded: true` and an unchanged wallet balance |
-| Rate limit | Send more than 60 requests in a minute and expect `429` |
-
----
 
 ## Known Limitations and What I Would Improve
 
@@ -527,14 +480,9 @@ Being explicit about the gaps and the next steps:
 1. **24-hour success rate.** Health currently uses the last 100 attempts per route. I would filter `ProviderAttempt` by `createdAt >= now() - 24h` and blend the *observed* success rate into the score instead of relying only on the configured `failureRate`.
 2. **Background queue (B1).** Delivery is synchronous, so a large recipient list makes the request slow. A BullMQ/Redis worker would let the API return immediately with `PENDING` messages and deliver in the background, with retries and backoff.
 3. **Crash recovery.** If the process dies after the debit but before delivery finishes, messages stay `PENDING`. A reconciliation job should pick up stale `PENDING` messages and either retry or refund them.
-4. **Unit tests (B4).** Only the default NestJS scaffolds exist. The highest-value tests would cover the part counter, number normalisation, failover order and refund idempotency, plus a concurrency integration test.
-5. **Delivery webhooks (B3).** Add a signed webhook endpoint that updates message status from provider delivery reports.
-6. **Docker Compose (B5).** One command to start the API, PostgreSQL and Redis.
-7. **`977` normalisation edge case.** A genuine 10-digit number that begins with `977` would have its prefix stripped. The prefix should only be removed when the total length is 13 digits (or 12 with `+`).
-8. **Provider abstraction.** Each route exposes its balance through the database, not through a dedicated `getBalance()` method. A `Provider` interface with `send()` and `getBalance()` would make real gateways pluggable.
-9. **Wallet ledger.** Add an append-only `WalletTransaction` table (debit, refund, top-up) so every balance change is traceable.
-10. **Top-up endpoint.** `POST /wallet/topup` is a demo helper and should be admin-only or payment-backed.
-11. **Hardening.** Remove the `JWT_SECRET` fallback and fail fast if it is missing, add refresh tokens, deduplicate recipients, cap recipients per request, and add structured logging and health probes.
+4. **Docker Compose (B5).** One command to start the API, PostgreSQL and Redis.
+5. **`977` normalisation edge case.** A genuine 10-digit number that begins with `977` would have its prefix stripped. The prefix should only be removed when the total length is 13 digits (or 12 with `+`).
+6. **Top-up endpoint.** `POST /wallet/topup` is a demo helper and should be admin-only or payment-backed.
 
 ---
 
@@ -546,4 +494,4 @@ A 3–5 minute walkthrough covering **a send, a failover, a refund and the logs*
 
 ## Author
 
-**Hrit** — Backend Developer Intern candidate, Nest Nepal Business Solutions
+**Hrit** — Backend Developer candidate, Nest Nepal Business Solutions
